@@ -1,0 +1,140 @@
+diff --git a/app/gui.py b/app/gui.py
+index 0000000..1111111 100644
+--- a/app/gui.py
++++ b/app/gui.py
+@@
+-    def _build_metrics_tab(self, parent):
+-        toolbar = ttk.Frame(parent)
+-        toolbar.pack(fill=tk.X, pady=4)
+-
+-        btn = ttk.Button(toolbar, text="Atualizar", command=lambda: threading.Thread(target=self._fetch_metrics, daemon=True).start())
+-        btn.pack(side=tk.LEFT, padx=4)
+-
+-        self.metrics_text = scrolledtext.ScrolledText(parent, height=20, state=tk.NORMAL)
+-        self.metrics_text.pack(fill=tk.BOTH, expand=True)
+-        self.metrics_text.insert(tk.END, "Clique em Atualizar para carregar métricas...\n")
++    def _build_metrics_tab(self, parent):
++        toolbar = ttk.Frame(parent)
++        toolbar.pack(fill=tk.X, pady=4)
++        # Atualizar button with reference so we can disable while loading
++        self.metrics_update_btn = ttk.Button(
++            toolbar,
++            text="Atualizar",
++            command=lambda: threading.Thread(target=self._fetch_metrics, daemon=True).start(),
++        )
++        self.metrics_update_btn.pack(side=tk.LEFT, padx=4)
++
++        self.metrics_text = scrolledtext.ScrolledText(parent, height=20, state=tk.NORMAL)
++        self.metrics_text.pack(fill=tk.BOTH, expand=True)
++        self.metrics_text.insert(tk.END, "Clique em Atualizar para carregar métricas...\n")
+@@
+-    def _fetch_metrics(self):
+-        url = "http://127.0.0.1:8000/metrics"
+-        try:
+-            resp = requests.get(url, timeout=3)
+-            resp.raise_for_status()
+-            metrics = resp.json()
+-        except Exception as e:
+-            self._log(f"Erro ao buscar métricas: {e}")
+-
+-            def show_err():
+-                self.metrics_text.config(state=tk.NORMAL)
+-                self.metrics_text.delete("1.0", tk.END)
+-                self.metrics_text.insert(tk.END, f"Erro ao buscar métricas: {e}\n")
+-                self.metrics_text.config(state=tk.DISABLED)
+-
+-            self.root.after(0, show_err)
+-            return
+-
+-        def render():
+-            self.metrics_text.config(state=tk.NORMAL)
+-            self.metrics_text.delete("1.0", tk.END)
+-            # pretty print basic aggregates
+-            self.metrics_text.insert(tk.END, f"total_ads: {metrics.get('total_ads')}\n")
+-            self.metrics_text.insert(tk.END, f"total_runs: {metrics.get('total_runs')}\n")
+-            self.metrics_text.insert(tk.END, f"avg_duration: {metrics.get('avg_duration')}\n")
+-            self.metrics_text.insert(tk.END, f"p50_duration: {metrics.get('p50_duration')}\n")
+-            self.metrics_text.insert(tk.END, f"p95_duration: {metrics.get('p95_duration')}\n\n")
+-            # per-keyword
+-            per = metrics.get('per_keyword') or {}
+-            if not per:
+-                self.metrics_text.insert(tk.END, "Nenhum dado por keyword.\n")
+-            else:
+-                self.metrics_text.insert(tk.END, "Per keyword:\n")
+-                for k, v in per.items():
+-                    self.metrics_text.insert(tk.END, f"  {k}: runs={v.get('runs')} ads={v.get('ads')} avg_duration={v.get('avg_duration')}\n")
+-            self.metrics_text.config(state=tk.DISABLED)
+-
+-        self.root.after(0, render)
++    def _fetch_metrics(self):
++        url = "http://127.0.0.1:8000/metrics"
++        # show loading UI and disable button
++        def show_loading():
++            try:
++                self.metrics_update_btn.config(state=tk.DISABLED)
++            except Exception:
++                pass
++            self.metrics_text.config(state=tk.NORMAL)
++            self.metrics_text.delete("1.0", tk.END)
++            self.metrics_text.insert(tk.END, "Carregando...\n")
++            self.metrics_text.config(state=tk.DISABLED)
++
++        self.root.after(0, show_loading)
++        try:
++            resp = requests.get(url, timeout=3)
++            resp.raise_for_status()
++            metrics = resp.json()
++        except Exception as e:
++            self._log(f"Erro ao buscar métricas: {e}")
++
++            def show_err():
++                self.metrics_text.config(state=tk.NORMAL)
++                self.metrics_text.delete("1.0", tk.END)
++                self.metrics_text.insert(tk.END, f"Erro ao buscar métricas: {e}\n")
++                self.metrics_text.config(state=tk.DISABLED)
++                try:
++                    self.metrics_update_btn.config(state=tk.NORMAL)
++                except Exception:
++                    pass
++
++            self.root.after(0, show_err)
++            return
++
++        def render():
++            self.metrics_text.config(state=tk.NORMAL)
++            self.metrics_text.delete("1.0", tk.END)
++            # pretty print basic aggregates with formatting
++            def fmt_num(x):
++                try:
++                    if x is None:
++                        return "-"
++                    # show integers without decimals, floats with 2 decimals
++                    if isinstance(x, int):
++                        return str(x)
++                    return f"{float(x):.2f}"
++                except Exception:
++                    return str(x)
++
++            self.metrics_text.insert(tk.END, f"total_ads: {fmt_num(metrics.get('total_ads'))}\n")
++            self.metrics_text.insert(tk.END, f"total_runs: {fmt_num(metrics.get('total_runs'))}\n")
++            self.metrics_text.insert(tk.END, f"avg_duration: {fmt_num(metrics.get('avg_duration'))}\n")
++            self.metrics_text.insert(tk.END, f"p50_duration: {fmt_num(metrics.get('p50_duration'))}\n")
++            self.metrics_text.insert(tk.END, f"p95_duration: {fmt_num(metrics.get('p95_duration'))}\n\n")
++            # per-keyword
++            per = metrics.get('per_keyword') or {}
++            if not per:
++                self.metrics_text.insert(tk.END, "Nenhum dado por keyword.\n")
++            else:
++                self.metrics_text.insert(tk.END, "Per keyword:\n")
++                for k, v in per.items():
++                    runs = fmt_num(v.get('runs'))
++                    ads = fmt_num(v.get('ads'))
++                    avg_d = fmt_num(v.get('avg_duration'))
++                    self.metrics_text.insert(tk.END, f"  {k}: runs={runs} ads={ads} avg_duration={avg_d}\n")
++            self.metrics_text.config(state=tk.DISABLED)
++            try:
++                self.metrics_update_btn.config(state=tk.NORMAL)
++            except Exception:
++                pass
++
++        self.root.after(0, render)

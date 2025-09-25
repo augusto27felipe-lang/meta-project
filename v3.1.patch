@@ -1,0 +1,246 @@
+diff --git a/backend/etapa4_service/main.py b/backend/etapa4_service/main.py
+index 1234567..89abcde 100644
+--- a/backend/etapa4_service/main.py
++++ b/backend/etapa4_service/main.py
+@@
+ from fastapi import FastAPI, Depends
+ from sqlalchemy.orm import Session
+-from data.db import get_db
+-from data.models import KeywordRun
++from data.db import get_db
++from data.models import KeywordRun, Ad
++from sqlalchemy import func
++from collections import defaultdict
+ 
+ app = FastAPI()
+ 
+ @app.get("/health")
+ def health():
+     return {"status": "ok"}
++
++
++@app.get("/ads")
++def list_ads(db: Session = Depends(get_db)):
++    ads = db.query(Ad).all()
++    return [
++        {
++            "id": ad.id,
++            "keyword": ad.keyword,
++            "title": ad.title,
++            "domain": ad.domain,
++            "created_at": ad.created_at,
++        }
++        for ad in ads
++    ]
++
++
++@app.get("/runs")
++def list_runs(db: Session = Depends(get_db)):
++    runs = db.query(KeywordRun).all()
++    return [
++        {
++            "id": run.id,
++            "keyword": run.keyword,
++            "started_at": run.started_at,
++            "duration_s": run.duration_s,
++            "results_count": run.results_count,
++            "status": run.status,
++        }
++        for run in runs
++    ]
++
++
++@app.get("/domains")
++def list_domains(db: Session = Depends(get_db)):
++    rows = db.query(Ad.domain, func.count(Ad.id)).group_by(Ad.domain).all()
++    return [{"domain": d, "count": c} for d, c in rows]
++
++
++def _percentile(data, percentile):
++    if not data:
++        return None
++    data = sorted(data)
++    k = (len(data) - 1) * (percentile / 100)
++    f = int(k)
++    c = min(f + 1, len(data) - 1)
++    if f == c:
++        return data[int(k)]
++    d0 = data[f] * (c - k)
++    d1 = data[c] * (k - f)
++    return d0 + d1
++
++
++@app.get("/metrics")
++def metrics(db: Session = Depends(get_db)):
++    runs = db.query(KeywordRun).all()
++    ads = db.query(Ad).all()
++
++    durations = [r.duration_s for r in runs if r.duration_s is not None]
++    total_ads = len(ads)
++    total_runs = len(runs)
++
++    avg = sum(durations) / len(durations) if durations else None
++    p50 = _percentile(durations, 50) if durations else None
++    p95 = _percentile(durations, 95) if durations else None
++
++    per_keyword = defaultdict(lambda: {"runs": 0, "ads": 0, "avg_duration": None})
++    for r in runs:
++        pk = per_keyword[r.keyword]
++        pk["runs"] += 1
++        if r.duration_s:
++            if pk["avg_duration"] is None:
++                pk["avg_duration"] = r.duration_s
++            else:
++                pk["avg_duration"] = (pk["avg_duration"] + r.duration_s) / 2
++    for ad in ads:
++        per_keyword[ad.keyword]["ads"] += 1
++
++    return {
++        "total_ads": total_ads,
++        "total_runs": total_runs,
++        "avg_duration": avg,
++        "p50_duration": p50,
++        "p95_duration": p95,
++        "per_keyword": per_keyword,
++    }
+diff --git a/app/gui.py b/app/gui.py
+index 1234567..89abcde 100644
+--- a/app/gui.py
++++ b/app/gui.py
+@@
+ import tkinter as tk
+ from tkinter import ttk, scrolledtext
+ import threading
++import requests
+@@
+     def _build(self):
+         notebook = ttk.Notebook(self.root)
+         notebook.pack(fill="both", expand=True)
+ 
+         tab1 = ttk.Frame(notebook)
+         notebook.add(tab1, text="Logs")
+         self._build_logs_tab(tab1)
+ 
+         tab2 = ttk.Frame(notebook)
+         notebook.add(tab2, text="Anúncios")
+-        # TODO: implementar
++        self._build_ads_tab(tab2)
++
++        tab3 = ttk.Frame(notebook)
++        notebook.add(tab3, text="Métricas")
++        self._build_metrics_tab(tab3)
++
++    def _build_ads_tab(self, frame):
++        btn = ttk.Button(frame, text="Atualizar", command=lambda: self._fetch_ads())
++        btn.pack(pady=5)
++        self.ads_area = scrolledtext.ScrolledText(frame, height=20, width=80)
++        self.ads_area.pack(fill="both", expand=True)
++
++    def _fetch_ads(self):
++        self.ads_area.delete("1.0", tk.END)
++        try:
++            resp = requests.get("http://127.0.0.1:8000/ads")
++            ads = resp.json()
++            if not ads:
++                self.ads_area.insert(tk.END, "Nenhum anúncio encontrado.\n")
++            for ad in ads:
++                line = f"[{ad['keyword']}] {ad['title']} - {ad['domain']}\n"
++                self.ads_area.insert(tk.END, line)
++        except Exception as e:
++            self.ads_area.insert(tk.END, f"Erro ao buscar anúncios: {e}\n")
++
++    def _build_metrics_tab(self, frame):
++        btn = ttk.Button(frame, text="Atualizar", command=lambda: self._fetch_metrics())
++        btn.pack(pady=5)
++        self.metrics_area = scrolledtext.ScrolledText(frame, height=20, width=80)
++        self.metrics_area.pack(fill="both", expand=True)
++
++    def _fetch_metrics(self):
++        self.metrics_area.delete("1.0", tk.END)
++        try:
++            resp = requests.get("http://127.0.0.1:8000/metrics")
++            metrics = resp.json()
++            self.metrics_area.insert(tk.END, f"Total Ads: {metrics['total_ads']}\n")
++            self.metrics_area.insert(tk.END, f"Total Runs: {metrics['total_runs']}\n")
++            self.metrics_area.insert(tk.END, f"Avg Duration: {metrics['avg_duration']}\n")
++            self.metrics_area.insert(tk.END, f"P50 Duration: {metrics['p50_duration']}\n")
++            self.metrics_area.insert(tk.END, f"P95 Duration: {metrics['p95_duration']}\n\n")
++            self.metrics_area.insert(tk.END, "Per Keyword:\n")
++            for kw, data in metrics["per_keyword"].items():
++                self.metrics_area.insert(
++                    tk.END,
++                    f"  {kw}: runs={data['runs']}, ads={data['ads']}, avg_duration={data['avg_duration']}\n"
++                )
++        except Exception as e:
++            self.metrics_area.insert(tk.END, f"Erro ao buscar métricas: {e}\n")
+diff --git a/tests/test_api_integration.py b/tests/test_api_integration.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/tests/test_api_integration.py
+@@
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy.orm import Session
++
++from backend.etapa4_service.main import app
++from data.db import SessionLocal, Base, engine
++from data import models
++
++client = TestClient(app)
++
++@pytest.fixture(autouse=True)
++def setup_db():
++    Base.metadata.drop_all(bind=engine)
++    Base.metadata.create_all(bind=engine)
++    yield
++    Base.metadata.drop_all(bind=engine)
++
++def seed_data():
++    with SessionLocal() as db:
++        run1 = models.KeywordRun(keyword="python", duration_s=1.0, results_count=2, status="finished")
++        run2 = models.KeywordRun(keyword="tkinter", duration_s=2.0, results_count=3, status="finished")
++        db.add_all([run1, run2])
++        db.add_all([
++            models.Ad(keyword="python", title="Ad1", domain="example.com", unique_id="u1"),
++            models.Ad(keyword="python", title="Ad2", domain="example.com", unique_id="u2"),
++            models.Ad(keyword="tkinter", title="Ad3", domain="another.com", unique_id="u3"),
++        ])
++        db.commit()
++
++
++def test_health():
++    resp = client.get("/health")
++    assert resp.status_code == 200
++    assert resp.json() == {"status": "ok"}
++
++
++def test_ads_runs_domains_metrics():
++    seed_data()
++
++    # /ads
++    resp = client.get("/ads")
++    ads = resp.json()
++    assert len(ads) == 3
++    assert any(ad["keyword"] == "python" for ad in ads)
++
++    # /runs
++    resp = client.get("/runs")
++    runs = resp.json()
++    assert len(runs) == 2
++    assert any(run["keyword"] == "tkinter" for run in runs)
++
++    # /domains
++    resp = client.get("/domains")
++    domains = resp.json()
++    assert {"domain": "example.com", "count": 2} in domains
++    assert {"domain": "another.com", "count": 1} in domains
++
++    # /metrics
++    resp = client.get("/metrics")
++    metrics = resp.json()
++    assert metrics["total_ads"] == 3
++    assert metrics["total_runs"] == 2
++    assert "per_keyword" in metrics
++    assert metrics["per_keyword"]["python"]["ads"] == 2
++    assert metrics["per_keyword"]["tkinter"]["ads"] == 1

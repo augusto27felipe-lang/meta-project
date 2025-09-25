@@ -1,0 +1,11 @@
+click
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+pydantic
+playwright
+pytest
+requests
+python-dotenv
+rich
