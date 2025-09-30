@@ -1,0 +1,65 @@
+name: CI - Build & Test Docker
+
+on:
+  push:
+    branches: [ main, run-v3.1 ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      # No additional services required
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Build Docker image
+        run: |
+          docker build -t meta-project:ci .
+
+      - name: Run unit tests inside container
+        run: |
+          # start container in background and run pytest
+          CONTAINER_ID=$(docker create meta-project:ci)
+          docker cp requirements.txt $CONTAINER_ID:/app/requirements.txt
+          docker start $CONTAINER_ID
+          docker exec $CONTAINER_ID /bin/sh -c "python -m pip install -r requirements.txt && python -m pytest -q"
+        shell: bash
+
+      - name: Smoke test container (healthcheck)
+        run: |
+          # Run container mapping port 8000 and wait for /health
+          CID=$(docker run -d -p 8000:8000 meta-project:ci)
+          echo "container $CID started"
+          for i in $(seq 1 20); do
+            if curl -sS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              echo "health ok"
+              break
+            fi
+            sleep 1
+          done
+          docker stop $CID
+        shell: bash
+
+      - name: Upload coverage to Codecov (optional)
+        if: secrets.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false

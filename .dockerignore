@@ -1,0 +1,13 @@
+.venv
+*.pyc
+__pycache__/
+.git
+logs/
+data/*.db
+*.db
+.env
+.vscode
+.idea
+pytest_full_run.txt
+pytest_log_after_psutil.txt
+pytest_log.txt
