@@ -196,6 +196,31 @@ Notas:
 
 ---
 
+## ⚙️ Usando `UVICORN_PORT` / `--port` para testes locais
+
+Para facilitar smoke tests locais em portas alternativas (evitando conflitos), `scripts/start_uvicorn_bg.py` aceita:
+
+- variável de ambiente `UVICORN_PORT` (ex.: `8001`), ou
+- argumento CLI `--port=8001`.
+
+Exemplos (PowerShell):
+
+```powershell
+# Usando CLI
+.\.venv\Scripts\python.exe scripts\start_uvicorn_bg.py --port=8001
+
+# Usando variável de ambiente
+$env:UVICORN_PORT = '8002'
+.\.venv\Scripts\python.exe scripts\start_uvicorn_bg.py
+```
+
+Isso facilita rodar múltiplas instâncias em paralelo para troubleshooting.
+
+## 🔐 Codecov (opcional)
+
+Se você quiser habilitar upload de cobertura no CI, adicione o secret `CODECOV_TOKEN` em Settings → Secrets → Actions. Com o token presente, o workflow fará upload de cobertura ao final do build.
+
+
 ## 📜 Contrato de erro (resumo)
 
 O formato de erros de execução (quando uma run falha) segue o esqueleto JSON abaixo. Adicione exemplos reais dos logs/artefatos ao documento principal quando houver runs falhas para ajudar debugging.
